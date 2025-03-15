@@ -131,18 +131,23 @@ function concatArrayBuffers(buffer1, buffer2) {
 }
 
 async function fetchEphemeralKey() {
-  const resp = await fetch("http://localhost:3001/api/session");
+  const resp = await fetch(
+    "https://conversational-agent-b.vercel.app/api/session"
+  );
   const data = await resp.json();
   return data.ephemeralKey;
 }
 
 async function fetchRagContext(query) {
   if (!query || query.length < 3) return "";
-  const resp = await fetch("http://localhost:3001/api/rag", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ query }),
-  });
+  const resp = await fetch(
+    "https://conversational-agent-b.vercel.app/api/rag",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    }
+  );
   const data = await resp.json();
   return data.context || "";
 }
