@@ -8,7 +8,7 @@ const cors = require("cors");
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
-const REALTIME_VOICE = "verse"; // e.g. "plain", "loud", etc.
+const REALTIME_VOICE = "verse";
 
 let vectorStore = null;
 
@@ -22,6 +22,10 @@ async function buildVectorStore() {
   vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
   console.log("Vector store ready.");
 }
+
+buildVectorStore().catch((err) => {
+  console.error("Error initializing vector store:", err);
+});
 
 async function retrieveContext(query, topK = 3) {
   if (!vectorStore) return "";
