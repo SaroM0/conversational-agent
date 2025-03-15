@@ -57,7 +57,7 @@ app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 // Endpoint: ephemeral key
-app.get("/api/session", async (req, res) => {
+app.get("/session", async (req, res) => {
   try {
     const key = await createEphemeralKey();
     res.json({ ephemeralKey: key });
@@ -68,7 +68,7 @@ app.get("/api/session", async (req, res) => {
 });
 
 // Endpoint: RAG
-app.post("/api/rag", async (req, res) => {
+app.post("/rag", async (req, res) => {
   try {
     const { query } = req.body;
     if (!query) {
