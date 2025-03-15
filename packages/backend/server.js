@@ -78,8 +78,4 @@ app.post("/api/rag", async (req, res) => {
   }
 });
 
-const PORT = 3001;
-app.listen(PORT, async () => {
-  console.log(`Backend listening on http://localhost:${PORT}`);
-  await buildVectorStore();
-});
+module.exports = app;
