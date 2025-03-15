@@ -1,11 +1,15 @@
 require("dotenv").config();
 const express = require("express");
-const fetch = require("node-fetch");
 const { OpenAIEmbeddings } = require("@langchain/openai");
 const { MemoryVectorStore } = require("langchain/vectorstores/memory");
 const { PDFLoader } = require("@langchain/community/document_loaders/fs/pdf");
 const cors = require("cors");
-const { get, set } = require("@vercel/edge-config");
+
+const { createClient } = require("@vercel/edge-config");
+
+// Create an Edge Config client using the connection string from the environment variable
+const EDGE_CONFIG_CONNECTION_STRING = process.env.EDGE_CONFIG;
+const edgeConfigClient = createClient(EDGE_CONFIG_CONNECTION_STRING);
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
@@ -14,26 +18,37 @@ const REALTIME_VOICE = "verse";
 let vectorStore = null;
 
 async function buildVectorStore() {
-  const serializedData = await get("vectorstore");
-  if (serializedData && serializedData.docs) {
-    console.log("Cargando vector store persistente desde Edge Config...");
-    const { docs } = serializedData;
-    const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
-    vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
-  } else {
-    console.log("Construyendo vector store en memoria desde PDF...");
-    const loader = new PDFLoader("./resume.pdf");
-    const docs = await loader.load();
-    const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
-    vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
-    // Guarda la información relevante en Edge Config
-    await set("vectorstore", { docs });
-    console.log("Vector store persistido en Edge Config.");
+  try {
+    // Read the vector store using the official SDK helper method
+    const stored = await edgeConfigClient.get("vectorstore");
+    if (stored && stored.docs) {
+      console.log("Loading persistent vector store from Edge Config...");
+      const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
+      vectorStore = await MemoryVectorStore.fromDocuments(
+        stored.docs,
+        embeddings
+      );
+      return;
+    }
+  } catch (err) {
+    console.error("Error reading from Edge Config:", err);
   }
+
+  // If the item does not exist, build the vector store from the PDF
+  console.log("Building vector store in memory from PDF...");
+  const loader = new PDFLoader("./resume.pdf");
+  const docs = await loader.load();
+  const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
+  vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
+
+  // Note: Persisting data to Edge Config is not supported via the official SDK.
+  console.log(
+    "Persisting vector store to Edge Config is not supported via the SDK. Skipping persist step."
+  );
 }
 
 buildVectorStore().catch((err) => {
-  console.error("Error al construir el vector store:", err);
+  console.error("Error building the vector store:", err);
 });
 
 async function retrieveContext(query, topK = 3) {
