@@ -79,6 +79,17 @@ const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
+// GET route for the cv stored in Edge Config
+app.get("/cv", async (req, res) => {
+  try {
+    const cv = await edgeConfigClient.get("cv");
+    res.json(cv);
+  } catch (err) {
+    console.error("Error fetching cv:", err);
+    res.status(500).json({ error: err.toString() });
+  }
+});
+
 app.get("/session", async (req, res) => {
   try {
     const key = await createEphemeralKey();
