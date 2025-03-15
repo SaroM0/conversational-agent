@@ -15,7 +15,7 @@ let vectorStore = null;
 // 1) Build vector store from PDF
 async function buildVectorStore() {
   console.log("Loading PDF for RAG...");
-  const loader = new PDFLoader("resume.pdf");
+  const loader = new PDFLoader("./resume.pdf");
   const docs = await loader.load();
   console.log("Building in-memory vector store...");
   const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
