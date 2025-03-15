@@ -82,4 +82,11 @@ app.post("/api/rag", async (req, res) => {
   }
 });
 
+const PORT = process.env.PORT || 3001;
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Backend listening on port ${PORT}`);
+  });
+}
+
 module.exports = app;
