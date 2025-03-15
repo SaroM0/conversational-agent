@@ -1,9 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 
-// Ajusta esto a tu modelo
 const MODEL = "gpt-4o-realtime-preview-2024-12-17";
 
-// Mensaje de sistema que describe al “entrevistador” de forma estricta
 const systemPrompt = `
 Always begin by briefly introducing yourself. You are a professional interviewer conducting a job interview for an engineering position. Your sole responsibility is to ask interview questions only—you must never provide any commentary, explanations, or answers.
 
@@ -35,21 +33,8 @@ const NO_RESPONSE_TIMEOUT_MS = 30000;
 let interactionCount = 0;
 const INTERACTION_LIMIT = 5;
 
-/**
- * Función que decide si un texto parece “relevante” para la entrevista
- * o si se trata de una interrupción/ruido/charla con otra persona.
- *
- * Actualmente hace:
- *  - checkeo por cadenas que indican que el usuario habla con alguien más (“mom”, “friend”, “just a second”...).
- *  - si las detecta, retorna false (no es relevante).
- *  - de lo contrario, true.
- *
- *  Nota: En un entorno real, podrías hacerlo con un modelo de clasificación ML
- *  o un endpoint LLM que etiquete la inHow do you handle working under pressure?tención (p.ej. “¿es parte de la respuesta?”).
- */
 function isRelevantTranscript(text) {
   const lower = text.toLowerCase();
-  // Palabras/expresiones que sugieren interrupción o charla con otros
   const irrelevantMarkers = [
     "mom",
     "dad",
@@ -70,9 +55,6 @@ function isRelevantTranscript(text) {
     }
   }
 
-  // Ajuste adicional: si no menciona nada relacionado al trabajo/entrevista
-  // y es muy corto, también podríamos descartarlo. Aquí, a modo de ejemplo,
-  // lo dejamos simple.
   return true;
 }
 
@@ -80,7 +62,6 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// (No se usan en este ejemplo, pero aquí quedan si se necesitan en el futuro)
 function base64ToArrayBuffer(base64) {
   const binaryString = atob(base64);
   const len = binaryString.length;
@@ -152,7 +133,6 @@ function isCoherent(text) {
   return words.length >= MIN_WORDS;
 }
 
-// Construye un contexto conversacional con roles para enviar al modelo
 function buildConversationContext(messages) {
   return messages
     .map((msg) => {
@@ -179,14 +159,11 @@ export default function App() {
   const pcRef = useRef(null);
   const dcRef = useRef(null);
 
-  // Donde acumulamos transcripciones “válidas” (relevantes) del candidato
   const accumulatedTranscriptRef = useRef("");
   const transcriptTimeoutRef = useRef(null);
 
-  // Ignorar transcripciones durante la locución del entrevistador
   const ignoreTranscriptionsUntil = useRef(0);
 
-  // Timeout si el candidato no responde
   const noCandidateResponseTimeoutRef = useRef(null);
 
   useEffect(() => {
@@ -225,7 +202,6 @@ export default function App() {
         setRemoteStream(event.streams[0]);
       };
 
-      // Captura de audio local
       const localStream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -275,25 +251,20 @@ export default function App() {
       const msg = JSON.parse(e.data);
 
       switch (msg.type) {
-        // Transcripciones del usuario (generalmente)
         case "transcript.partial":
           handleTranscriptPartial(msg.text);
           break;
 
-        // Indican inicio/fin de la respuesta del modelo
         case "response.start":
           setModelSpeaking(true);
-          // Bloquear transcripciones de usuario
           ignoreTranscriptionsUntil.current = Number.MAX_SAFE_INTEGER;
           break;
         case "response.done":
           setModelSpeaking(false);
           addMessage("interviewer", "[Interviewer ended response]");
-          // Reactivar transcripciones del usuario con leve retardo
           ignoreTranscriptionsUntil.current = Date.now() + 500;
           break;
 
-        // Depurar o ver qué otros eventos llegan
         default:
           addMessage("system", JSON.stringify(msg));
           break;
@@ -304,26 +275,18 @@ export default function App() {
   }
 
   function handleTranscriptPartial(text) {
-    // Solo procesa si estamos esperando respuesta
     if (!waitingForResponse) return;
-    // Ignora transcripciones si estamos en ventana de bloqueo
     if (Date.now() < ignoreTranscriptionsUntil.current) return;
 
-    // -------------------------
-    // NUEVO: Si el texto no es relevante (interrupción / conversación ajena),
-    // lo ignoramos completamente y salimos de la función.
-    // -------------------------
     if (!isRelevantTranscript(text)) {
       console.log("Ignoring interruption or irrelevant text:", text);
       return;
     }
-    // -------------------------
 
     if (transcriptTimeoutRef.current) {
       clearTimeout(transcriptTimeoutRef.current);
     }
 
-    // Acumular el texto
     accumulatedTranscriptRef.current = text;
 
     transcriptTimeoutRef.current = setTimeout(async () => {
@@ -333,7 +296,6 @@ export default function App() {
         setWaitingForResponse(false);
         clearTimeoutIfExists(noCandidateResponseTimeoutRef);
 
-        // Procesar respuesta del usuario -> siguiente pregunta
         await processCandidateResponse(finalTranscript);
         accumulatedTranscriptRef.current = "";
       } else {
@@ -353,16 +315,14 @@ export default function App() {
   }
 
   async function processCandidateResponse(candidateText, forceStrict = false) {
-    interactionCount++; // Incrementa el contador de interacciones
+    interactionCount++;
     const conversationContext = buildConversationContext(
       messages.concat([{ role: "user", text: candidateText }])
     );
     const context = await fetchRagContext(candidateText);
 
-    // Arma las instrucciones básicas
     let instructions = `${systemPrompt}\n\n`;
 
-    // Si se cumple el límite, vuelve a inyectar el systemPrompt adicionalmente
     if (interactionCount % INTERACTION_LIMIT === 0) {
       instructions += `REINJECT SYSTEM PROMPT:\n${systemPrompt}\n\n`;
     }
@@ -393,14 +353,11 @@ export default function App() {
     };
     dc.send(JSON.stringify(event));
 
-    // El entrevistador habla
     setModelSpeaking(true);
     ignoreTranscriptionsUntil.current = Number.MAX_SAFE_INTEGER;
 
-    // Esperamos la respuesta del candidato
     setWaitingForResponse(true);
 
-    // Timeout si no responde
     noCandidateResponseTimeoutRef.current = setTimeout(() => {
       if (waitingForResponse) {
         console.log("Candidate didn't respond in time, sending nudge question");
@@ -417,7 +374,6 @@ export default function App() {
     const conversationContext = buildConversationContext(messages);
     let instructions = `${systemPrompt}\n\n`;
 
-    // Reinyección opcional si se cumple el límite
     if (interactionCount % INTERACTION_LIMIT === 0) {
       instructions += `REINJECT SYSTEM PROMPT:\n${systemPrompt}\n\n`;
     }

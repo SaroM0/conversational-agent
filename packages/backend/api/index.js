@@ -12,7 +12,6 @@ const REALTIME_VOICE = "verse";
 
 let vectorStore = null;
 
-// 1) Build vector store from PDF
 async function buildVectorStore() {
   console.log("Loading PDF for RAG...");
   const loader = new PDFLoader("./resume.pdf");
@@ -34,7 +33,6 @@ async function retrieveContext(query, topK = 3) {
   return results.map((doc) => doc.pageContent).join("\n\n");
 }
 
-// 2) Create ephemeral key
 async function createEphemeralKey() {
   const body = { model: REALTIME_MODEL, voice: REALTIME_VOICE };
   const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
@@ -49,14 +47,13 @@ async function createEphemeralKey() {
     throw new Error(`Failed ephemeral key: ${await response.text()}`);
   }
   const data = await response.json();
-  return data.client_secret.value; // ephemeral key
+  return data.client_secret.value;
 }
 
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
-// Endpoint: ephemeral key
 app.get("/session", async (req, res) => {
   try {
     const key = await createEphemeralKey();
@@ -67,7 +64,6 @@ app.get("/session", async (req, res) => {
   }
 });
 
-// Endpoint: RAG
 app.post("/rag", async (req, res) => {
   try {
     const { query } = req.body;
