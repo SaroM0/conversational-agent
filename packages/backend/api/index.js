@@ -16,21 +16,28 @@ let vectorStore = null;
 
 async function buildVectorStore() {
   if (fs.existsSync(VECTORSTORE_PATH)) {
+    console.log("Cargando vector store persistente...");
     const rawData = fs.readFileSync(VECTORSTORE_PATH, "utf8");
-    const serialized = JSON.parse(rawData);
-    vectorStore = MemoryVectorStore.deserialize(serialized);
+    const { docs, embeddingsData } = JSON.parse(rawData);
+    // Reconstruir el vector store a partir de los datos serializados.
+    const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
+    vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
+    // Aquí podrías restaurar embeddingsData si fuera necesario
   } else {
+    console.log("Construyendo vector store en memoria desde PDF...");
     const loader = new PDFLoader("./resume.pdf");
     const docs = await loader.load();
     const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
     vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
-    const serialized = vectorStore.serialize();
+    // Serializa la información relevante (por ejemplo, los documentos)
+    const serialized = { docs };
     fs.writeFileSync(VECTORSTORE_PATH, JSON.stringify(serialized));
+    console.log("Vector store persistido en disco.");
   }
 }
 
 buildVectorStore().catch((err) => {
-  console.error("Error initializing vector store:", err);
+  console.error("Error al construir el vector store:", err);
 });
 
 async function retrieveContext(query, topK = 3) {
