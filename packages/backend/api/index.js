@@ -5,6 +5,8 @@ const { OpenAIEmbeddings } = require("@langchain/openai");
 const { MemoryVectorStore } = require("langchain/vectorstores/memory");
 const { PDFLoader } = require("@langchain/community/document_loaders/fs/pdf");
 const cors = require("cors");
+const fs = require("fs");
+const VECTORSTORE_PATH = "./vectorstore.json";
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
@@ -13,13 +15,18 @@ const REALTIME_VOICE = "verse";
 let vectorStore = null;
 
 async function buildVectorStore() {
-  console.log("Loading PDF for RAG...");
-  const loader = new PDFLoader("./resume.pdf");
-  const docs = await loader.load();
-  console.log("Building in-memory vector store...");
-  const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
-  vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
-  console.log("Vector store ready.");
+  if (fs.existsSync(VECTORSTORE_PATH)) {
+    const rawData = fs.readFileSync(VECTORSTORE_PATH, "utf8");
+    const serialized = JSON.parse(rawData);
+    vectorStore = MemoryVectorStore.deserialize(serialized);
+  } else {
+    const loader = new PDFLoader("./resume.pdf");
+    const docs = await loader.load();
+    const embeddings = new OpenAIEmbeddings({ openAIApiKey: OPENAI_API_KEY });
+    vectorStore = await MemoryVectorStore.fromDocuments(docs, embeddings);
+    const serialized = vectorStore.serialize();
+    fs.writeFileSync(VECTORSTORE_PATH, JSON.stringify(serialized));
+  }
 }
 
 buildVectorStore().catch((err) => {
