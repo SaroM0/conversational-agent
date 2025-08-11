@@ -335,6 +335,18 @@ export default function App() {
       .join("\n");
   }
 
+  // Limit injected document context to reduce token pressure
+  const MAX_CONTEXT_CHARS = 8000;
+  function buildDocContextSnippet() {
+    if (!docText) return "";
+    const trimmed = docText.slice(0, MAX_CONTEXT_CHARS);
+    const truncatedNote =
+      docText.length > MAX_CONTEXT_CHARS
+        ? `\n[Nota: documento truncado a ${MAX_CONTEXT_CHARS.toLocaleString()} caracteres de ${docText.length.toLocaleString()}]`
+        : "";
+    return `${trimmed}${truncatedNote}`;
+  }
+
   async function copyAllHistory() {
     try {
       const transcript = buildExportTranscript(messages);
@@ -573,8 +585,10 @@ export default function App() {
     const context = await fetchRagContext(candidateText);
 
     let instructions = `${systemPrompt}\n\n`;
-    if (docText && docText.trim().length > 0) {
-      instructions += `DOCUMENTO DE CONTEXTO (extracto):\n${docText}\n\n`;
+    const docCtx = buildDocContextSnippet();
+    if (docCtx) {
+      instructions += `DOCUMENTO DE CONTEXTO (extracto):\n${docCtx}\n\n`;
+      instructions += `En cada respuesta, INDAGA exclusivamente con base en el DOCUMENTO DE CONTEXTO, formulando una sola pregunta de clarificación sobre hechos, pretensiones, derechos vulnerados o anexos. No generes contenido fuera de lo allí consignado.\n\n`;
     }
 
     if (interactionCount % INTERACTION_LIMIT === 0) {
@@ -627,8 +641,10 @@ export default function App() {
 
     const conversationContext = buildConversationContext(messages);
     let instructions = `${systemPrompt}\n\n`;
-    if (docText && docText.trim().length > 0) {
-      instructions += `DOCUMENTO DE CONTEXTO (extracto):\n${docText}\n\n`;
+    const docCtx2 = buildDocContextSnippet();
+    if (docCtx2) {
+      instructions += `DOCUMENTO DE CONTEXTO (extracto):\n${docCtx2}\n\n`;
+      instructions += `En cada respuesta, INDAGA exclusivamente con base en el DOCUMENTO DE CONTEXTO, formulando una sola pregunta de clarificación sobre hechos, pretensiones, derechos vulnerados o anexos. No generes contenido fuera de lo allí consignado.\n\n`;
     }
 
     if (interactionCount % INTERACTION_LIMIT === 0) {
@@ -728,7 +744,7 @@ export default function App() {
               }${uploadInfo.partial ? ", extracción parcial" : ""})`
             : "Ningún documento cargado (requerido)"}
         </div>
-        {!isConnected && (
+      {!isConnected && (
           <button
             onClick={connectRealtime}
             disabled={!hasDoc || uploading}
@@ -777,7 +793,7 @@ export default function App() {
               }}
             >
               Copiar conversación
-            </button>
+          </button>
           </div>
           <div
             style={{
