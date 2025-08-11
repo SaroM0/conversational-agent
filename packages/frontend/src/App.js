@@ -6,7 +6,8 @@ let MODEL = "gpt-4o-realtime-preview-2025-06-03";
 let systemPrompt = `
 <Prompt>
   <YouAre>
-    Eres un Entrevistador Jurídico Senior especializado en derecho público colombiano.
+    Eres un Abogado Jurídico especializado en derecho público colombiano.
+    Tienes una tutela como contexto de la cual debes indagar sobre los hechos, pretenciones, derechos fundamentales vulnerados, y anexos relacionados a la tutela.
     Tu objetivo es conducir entrevistas profundas, estructuradas y respetuosas con abogados(as) de la Registraduría
     para extraer su conocimiento práctico (know-how) sobre acciones de tutela y demás funciones misionales.
     No inventas información: tu labor es indagar, pedir ejemplos, pedir normativa y mapear procesos reales.
@@ -285,6 +286,11 @@ export default function App() {
   const [modelSpeaking, setModelSpeaking] = useState(false);
   const [waitingForResponse, setWaitingForResponse] = useState(false);
   const [remoteStream, setRemoteStream] = useState(null);
+  const [copyStatus, setCopyStatus] = useState("");
+  const [docText, setDocText] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [uploadInfo, setUploadInfo] = useState({ bytes: 0, numPages: null, partial: false, warning: "", error: "" });
+  const hasDoc = docText.trim().length > 0;
 
   const remoteAudioRef = useRef(null);
   const pcRef = useRef(null);
@@ -318,11 +324,90 @@ export default function App() {
   }, []);
 
   function addMessage(role, text) {
-    setMessages((prev) => [...prev, { role, text }]);
+    setMessages((prev) => [...prev, { role, text, ts: Date.now() }]);
+  }
+
+  function buildExportTranscript(msgs) {
+    const roleLabel = (role) =>
+      role === "user" ? "Interviewee" : role === "interviewer" ? "Interviewer" : "System";
+    return msgs
+      .map((m, i) => `${String(i + 1).padStart(3, "0")} | ${roleLabel(m.role)}: ${m.text}`)
+      .join("\n");
+  }
+
+  async function copyAllHistory() {
+    try {
+      const transcript = buildExportTranscript(messages);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(transcript);
+        setCopyStatus("Conversation copied to clipboard");
+        return;
+      }
+      const textArea = document.createElement("textarea");
+      textArea.value = transcript;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(textArea);
+      setCopyStatus(ok ? "Conversation copied to clipboard" : "Copy failed");
+    } catch (e) {
+      setCopyStatus("Copy failed");
+    }
+    setTimeout(() => setCopyStatus(""), 3000);
+  }
+
+  async function handlePdfUpload(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const form = new FormData();
+      form.append("file", file);
+      const resp = await fetch(`${BACKEND_URL}/upload-pdf`, {
+        method: "POST",
+        body: form,
+      });
+      const data = await resp.json();
+      if (data.error) {
+        setUploadInfo({ bytes: file.size, numPages: null, partial: true, warning: "", error: data.error });
+        setDocText("");
+        addMessage("system", `Error al extraer el texto del PDF: ${data.error}`);
+      } else {
+        setDocText(data.text || "");
+        setUploadInfo({
+          bytes: data.bytes ?? file.size,
+          numPages: data.numPages ?? null,
+          partial: !!data.partial,
+          warning: data.warning || "",
+          error: "",
+        });
+        const mb = Math.round(((data.bytes ?? file.size) / 1024 / 1024) * 100) / 100;
+        addMessage(
+          "system",
+          `Documento cargado (${mb} MB). ${data.numPages ? `Páginas: ${data.numPages}. ` : ""}${
+            data.partial ? "Extracción parcial." : "Texto extraído completamente (estimado)."
+          }`
+        );
+        if (data.warning) addMessage("system", `Aviso: ${data.warning}`);
+      }
+    } catch (err) {
+      setUploadInfo({ bytes: file.size, numPages: null, partial: true, warning: "", error: "Fallo de red o servidor." });
+      addMessage("system", "Error al cargar/parsear el PDF");
+    } finally {
+      setUploading(false);
+      e.target.value = "";
+    }
   }
 
   async function connectRealtime() {
     try {
+      if (!hasDoc) {
+        setStatus("Debe subir el PDF de la tutela antes de iniciar la conversación.");
+        return;
+      }
       setStatus("Fetching ephemeral key...");
       const ephemeralKey = await fetchEphemeralKey();
       console.log("Ephemeral key:", ephemeralKey);
@@ -333,10 +418,9 @@ export default function App() {
       dcRef.current = dc;
 
       dc.onopen = () => {
-        addMessage("system", "[DataChannel] opened.");
-        // Inicia la entrevista
+        addMessage("system", "[Canal de datos abierto]");
         interviewerAsks(
-          "Hello, I am your AI interviewer. Tell me about your background."
+          "Para iniciar, por favor describa brevemente el caso y confirme: ciudad, juez, juzgado, número de radicado, accionante y accionado."
         );
       };
 
@@ -410,9 +494,31 @@ export default function App() {
           ignoreTranscriptionsUntil.current = Date.now() + 500;
           break;
 
-        default:
-          addMessage("system", JSON.stringify(msg));
+        case "session.created": {
+          const { model, voice } = msg.session || {};
+          addMessage(
+            "system",
+            `Sesión creada (modelo: ${model || "?"}, voz: ${voice || "?"})`
+          );
           break;
+        }
+        case "response.created":
+        case "response.output_item.added":
+        case "conversation.item.created":
+        case "response.content_part.added":
+        case "response.audio_transcript.delta":
+        case "output_audio_buffer.started":
+        case "output_audio_buffer.stopped":
+        case "response.completed":
+        case "input_audio_buffer.collected":
+        case "input_audio_buffer.completed":
+          // Silenciar eventos internos para no llenar el historial
+          break;
+        default: {
+          const text = typeof msg?.type === "string" ? `Evento: ${msg.type}` : "Evento recibido";
+          addMessage("system", text);
+          break;
+        }
       }
     } catch (err) {
       addMessage("system", "Raw data: " + e.data);
@@ -467,6 +573,9 @@ export default function App() {
     const context = await fetchRagContext(candidateText);
 
     let instructions = `${systemPrompt}\n\n`;
+    if (docText && docText.trim().length > 0) {
+      instructions += `DOCUMENTO DE CONTEXTO (extracto):\n${docText}\n\n`;
+    }
 
     if (interactionCount % INTERACTION_LIMIT === 0) {
       instructions += `REINJECT SYSTEM PROMPT:\n${systemPrompt}\n\n`;
@@ -518,6 +627,9 @@ export default function App() {
 
     const conversationContext = buildConversationContext(messages);
     let instructions = `${systemPrompt}\n\n`;
+    if (docText && docText.trim().length > 0) {
+      instructions += `DOCUMENTO DE CONTEXTO (extracto):\n${docText}\n\n`;
+    }
 
     if (interactionCount % INTERACTION_LIMIT === 0) {
       instructions += `REINJECT SYSTEM PROMPT:\n${systemPrompt}\n\n`;
@@ -572,53 +684,153 @@ export default function App() {
   return (
     <div
       style={{
-        padding: 2,
+        padding: 16,
         background: "#1f1f1f",
         height: "100vh",
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "center",
+        justifyContent: "flex-start",
       }}
     >
-      <h1 style={{ color: "#ffffff" }}>AI Interviewer</h1>
-      {!isConnected && (
-        <button onClick={connectRealtime}>Connect to Realtime</button>
-      )}
+      <h1 style={{ color: "#ffffff", margin: "8px 0 12px" }}>Asistente Jurídico</h1>
+
+      <div
+        style={{
+          width: "90%",
+          maxWidth: 900,
+          background: "#2a2a2a",
+          padding: 12,
+          borderRadius: 10,
+          color: "#e8e8e8",
+          display: "flex",
+          alignItems: "center",
+          gap: 12,
+        }}
+      >
+        <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <span>Subir PDF de la tutela</span>
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handlePdfUpload}
+            disabled={uploading}
+          />
+        </label>
+        <div style={{ fontSize: 13, opacity: 0.9 }}>
+          {uploading
+            ? "Cargando y extrayendo texto..."
+            : uploadInfo.error
+            ? `Error: ${uploadInfo.error}`
+            : hasDoc
+            ? `Documento cargado (${docText.length.toLocaleString()} caracteres${
+                uploadInfo.numPages ? ", " + uploadInfo.numPages + " páginas" : ""
+              }${uploadInfo.partial ? ", extracción parcial" : ""})`
+            : "Ningún documento cargado (requerido)"}
+        </div>
+        {!isConnected && (
+          <button
+            onClick={connectRealtime}
+            disabled={!hasDoc || uploading}
+            style={{
+              marginLeft: "auto",
+              background: hasDoc && !uploading ? "#4caf50" : "#3a3a3a",
+              color: "#fff",
+              border: "none",
+              padding: "8px 12px",
+              borderRadius: 6,
+              cursor: hasDoc && !uploading ? "pointer" : "not-allowed",
+            }}
+          >
+            Conectar
+          </button>
+        )}
+      </div>
+
       {isConnected && (
         <>
           <audio ref={remoteAudioRef} autoPlay controls />
-          <button onClick={sendInterrupt} disabled={!modelSpeaking}>
-            Interrupt Interviewer
-          </button>
+          <div style={{ width: "90%", maxWidth: 900, display: "flex", gap: 8, marginTop: 8 }}>
+            <button
+              onClick={sendInterrupt}
+              disabled={!modelSpeaking}
+              style={{
+                background: modelSpeaking ? "#ff7043" : "#3a3a3a",
+                color: "#fff",
+                border: "none",
+                padding: "8px 12px",
+                borderRadius: 6,
+                cursor: modelSpeaking ? "pointer" : "not-allowed",
+              }}
+            >
+              Interrumpir
+            </button>
+            <button
+              onClick={copyAllHistory}
+              style={{
+                background: "#607d8b",
+                color: "#fff",
+                border: "none",
+                padding: "8px 12px",
+                borderRadius: 6,
+                cursor: "pointer",
+              }}
+            >
+              Copiar conversación
+            </button>
+          </div>
           <div
             style={{
-              marginTop: 20,
-              width: "80%",
-              maxHeight: "40vh",
+              marginTop: 12,
+              width: "90%",
+              maxWidth: 900,
+              maxHeight: "60vh",
               overflowY: "auto",
               background: "#333",
               padding: 10,
               color: "#fff",
+              borderRadius: 8,
+              boxShadow: "0 2px 8px rgba(0,0,0,0.25)",
             }}
           >
-            {messages.map((msg, index) => (
-              <div key={index} style={{ marginBottom: 5 }}>
-                <strong>
-                  {msg.role === "user"
-                    ? "Interviewee"
+            {messages.map((msg, index) => {
+              const label =
+                msg.role === "user"
+                  ? "Entrevistado"
+                  : msg.role === "interviewer"
+                  ? "Entrevistador"
+                  : "Sistema";
+              const bg =
+                msg.role === "user"
+                  ? "#253f2e"
                     : msg.role === "interviewer"
-                    ? "Interviewer"
-                    : "System"}
-                  :
-                </strong>{" "}
-                {msg.text}
+                  ? "#2b3b52"
+                  : "#444";
+              const ts = msg.ts ? new Date(msg.ts).toLocaleTimeString() : "";
+              return (
+                <div
+                  key={index}
+                  style={{
+                    marginBottom: 8,
+                    background: bg,
+                    padding: 10,
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 4 }}>
+                    {label} {ts && `• ${ts}`}
+                  </div>
+                  <div style={{ whiteSpace: "pre-wrap", lineHeight: 1.4 }}>{msg.text}</div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </>
       )}
       <div style={{ color: "#aaa", marginTop: 10 }}>{status}</div>
+      {copyStatus && (
+        <div style={{ color: "#8bc34a", marginTop: 6 }}>{copyStatus}</div>
+      )}
     </div>
   );
 }

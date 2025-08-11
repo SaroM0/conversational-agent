@@ -4,6 +4,8 @@ const { OpenAIEmbeddings } = require("@langchain/openai");
 const { MemoryVectorStore } = require("langchain/vectorstores/memory");
 const { PDFLoader } = require("@langchain/community/document_loaders/fs/pdf");
 const cors = require("cors");
+const multer = require("multer");
+const pdfParse = require("pdf-parse");
 
 const { createClient } = require("@vercel/edge-config");
 
@@ -83,6 +85,7 @@ async function createEphemeralKey() {
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 20 * 1024 * 1024 } });
 
 // GET runtime configuration for frontend
 app.get("/config", async (req, res) => {
@@ -130,6 +133,41 @@ app.post("/rag", async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.toString() });
+  }
+});
+
+// Accept a PDF upload and return its extracted text
+app.post("/upload-pdf", upload.single("file"), async (req, res) => {
+  try {
+    if (!req.file) {
+      return res.status(400).json({ error: "Missing PDF file under field 'file'" });
+    }
+    const data = await pdfParse(req.file.buffer);
+    const text = data?.text || "";
+    const numPages = data?.numpages || data?.numPages || null;
+    const numRendered = data?.numrender || data?.numRendered || null;
+    const bytes = req.file.size;
+
+    // Heuristics for partial extraction
+    let partial = false;
+    let warning = null;
+    if (numPages && numPages > 0) {
+      const charsPerPage = text.length / numPages;
+      if (charsPerPage < 200) {
+        partial = true;
+        warning =
+          "Texto extraído parcialmente; el documento podría ser escaneado o contener principalmente imágenes.";
+      }
+    } else if (text.length < 300 && bytes > 1024 * 200) {
+      partial = true;
+      warning =
+        "Texto extraído parcialmente; tamaño del archivo alto pero poco texto reconocido (posible PDF escaneado).";
+    }
+
+    return res.json({ text, numPages, numRendered, bytes, partial, warning });
+  } catch (err) {
+    console.error("PDF parse error:", err);
+    return res.status(200).json({ error: "No se pudo extraer el texto del PDF." });
   }
 });
 
