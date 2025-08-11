@@ -12,8 +12,10 @@ const EDGE_CONFIG_CONNECTION_STRING = process.env.EDGE_CONFIG;
 const edgeConfigClient = createClient(EDGE_CONFIG_CONNECTION_STRING);
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
-const REALTIME_MODEL = "gpt-4o-realtime-preview-2024-12-17";
-const REALTIME_VOICE = "verse";
+const REALTIME_MODEL = process.env.REALTIME_MODEL || "gpt-4o-realtime-preview-2024-12-17";
+const REALTIME_VOICE = process.env.REALTIME_VOICE || "verse";
+// Support multi-line prompts via escaped newlines in .env: SYSTEM_PROMPT="Line1\nLine2"
+const SYSTEM_PROMPT = (process.env.SYSTEM_PROMPT || "").replace(/\\n/g, "\n");
 
 let vectorStore = null;
 
@@ -60,6 +62,9 @@ async function retrieveContext(query, topK = 3) {
 
 async function createEphemeralKey() {
   const body = { model: REALTIME_MODEL, voice: REALTIME_VOICE };
+  if (SYSTEM_PROMPT && SYSTEM_PROMPT.trim().length > 0) {
+    body.instructions = SYSTEM_PROMPT;
+  }
   const response = await fetch("https://api.openai.com/v1/realtime/sessions", {
     method: "POST",
     headers: {
@@ -78,6 +83,20 @@ async function createEphemeralKey() {
 const app = express();
 app.use(cors({ origin: "*" }));
 app.use(express.json());
+
+// GET runtime configuration for frontend
+app.get("/config", async (req, res) => {
+  try {
+    res.json({
+      model: REALTIME_MODEL,
+      voice: REALTIME_VOICE,
+      systemPrompt: SYSTEM_PROMPT || "",
+    });
+  } catch (err) {
+    console.error("Error serving config:", err);
+    res.status(500).json({ error: err.toString() });
+  }
+});
 
 // GET route for the cv stored in Edge Config
 app.get("/cv", async (req, res) => {

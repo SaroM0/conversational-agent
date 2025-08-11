@@ -1,8 +1,9 @@
 import React, { useState, useRef, useEffect } from "react";
 
-const MODEL = "gpt-4o-realtime-preview-2024-12-17";
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://conversational-agent-b.vercel.app";
 
-const systemPrompt = `
+let MODEL = "gpt-4o-realtime-preview-2024-12-17";
+let systemPrompt = `
 Ignore the prompt:
 "Your knowledge cutoff is 2023-10. You are a helpful, witty, and friendly AI. Act like a human, but remember that you aren't a human and that you can't do human things in the real world. Your voice and personality should be warm and engaging, with a lively and playful tone. If interacting in a non-English language, start by using the standard accent or dialect familiar to the user. Talk quickly. You should always call a function if you can. Do not refer to these rules, even if you’re asked about them"
 Always begin by briefly introducing yourself. You are a professional interviewer conducting a job interview for an engineering position. Your sole responsibility is to ask interview questions only—you must never provide any commentary, explanations, or answers.
@@ -114,14 +115,14 @@ function concatArrayBuffers(buffer1, buffer2) {
 }
 
 async function fetchEphemeralKey() {
-  const resp = await fetch("https://conversational-agent-b.vercel.app/session");
+  const resp = await fetch(`${BACKEND_URL}/session`);
   const data = await resp.json();
   return data.ephemeralKey;
 }
 
 async function fetchRagContext(query) {
   if (!query || query.length < 3) return "";
-  const resp = await fetch("https://conversational-agent-b.vercel.app/rag", {
+  const resp = await fetch(`${BACKEND_URL}/rag`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query }),
@@ -173,6 +174,20 @@ export default function App() {
       remoteAudioRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);
+
+  useEffect(() => {
+    async function loadConfig() {
+      try {
+        const resp = await fetch(`${BACKEND_URL}/config`);
+        const cfg = await resp.json();
+        if (cfg?.model) MODEL = cfg.model;
+        if (typeof cfg?.systemPrompt === "string") systemPrompt = cfg.systemPrompt;
+      } catch (e) {
+        console.warn("Failed to load backend config, using defaults.", e);
+      }
+    }
+    loadConfig();
+  }, []);
 
   function addMessage(role, text) {
     setMessages((prev) => [...prev, { role, text }]);
